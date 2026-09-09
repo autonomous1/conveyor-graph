@@ -1,0 +1,56 @@
+{
+  "name": "conveyor-graph",
+  "version": "0.1.0",
+  "description": "Typed in-process conveyor graph for Node.js",
+  "type": "module",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/cjs/index.js"
+    },
+    "./utils": {
+      "types": "./dist/utils.d.ts",
+      "import": "./dist/utils.js",
+      "require": "./dist/cjs/utils.js"
+    },
+    "./subscriber": {
+      "types": "./dist/subscriber.d.ts",
+      "import": "./dist/subscriber.js",
+      "require": "./dist/cjs/subscriber.js"
+    }
+  },
+  "files": [
+    "dist",
+    "proto",
+    "src",
+    "CONTRACT.md",
+    "README.md"
+  ],
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && printf '{\"type\":\"commonjs\"}\\n' > dist/cjs/package.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:stress": "vitest run test/stress.test.ts",
+    "ci": "npm run typecheck && npm test && npm run test:stress && npm run build",
+    "example:wp-posts": "npx tsx examples/wp-posts-csv.ts"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "parallel-transform": "^1.2.0",
+    "through2": "^4.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/through2": "^2.0.41",
+    "mysql2": "^3.14.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.8"
+  }
+}

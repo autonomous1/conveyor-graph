@@ -1,0 +1,170 @@
+syntax = "proto3";
+
+package agentgraph.v1;
+
+// Cross-language source of truth for conveyor-graph.
+// Runtime TypeScript does not depend on protobuf; src/model.ts is the
+// hand-written projection. Tests fail if the two drift.
+
+// ---------------------------------------------------------------------------
+// Graph topology
+// ---------------------------------------------------------------------------
+
+message VertexOptions {
+  // When true, GraphAgent publishes the payload after the vertex runs.
+  bool publish = 1;
+  // When true, the vertex is a graph endpoint that publishes off-process
+  // (MQTT / multiplex) instead of piping to another local stream.
+  bool external = 2;
+  // Parallel transform concurrency. 0 / unset = serial through2.
+  uint32 parallel = 3;
+  map<string, string> labels = 4;
+  // "all" (default) or "first". First-match routing is Wave B.
+  string fanout = 5;
+  uint32 timeout_ms = 6;
+}
+
+message Vertex {
+  string id = 1;
+  VertexOptions options = 2;
+}
+
+message Edge {
+  string id = 1;       // "{source}-{target}"
+  string source = 2;
+  string target = 3;
+  uint32 capacity = 4;
+  string delivery = 5;  // required | bestEffort
+  string overflow = 6;  // block | drop | error
+}
+
+message Graph {
+  string id = 1;
+  map<string, Vertex> vertices = 2;
+  map<string, Edge> edges = 3;
+}
+
+// Built-in vertex ids. Implementations must accept these exact strings.
+message BuiltinVertices {
+  string log = 1;     // graph/log
+  string skip = 2;    // graph/skip
+  string error = 3;   // graph/error
+}
+
+// ---------------------------------------------------------------------------
+// Agent envelope — the unit that flows through vertices
+// ---------------------------------------------------------------------------
+
+message Agent {
+  string id = 1;
+  // Application payload. JSON-encoded in transports that need bytes.
+  bytes payload = 2;
+  string origin_vertex = 3;
+}
+
+// A vertex does local I/O (usually synchronous or a short await), then
+// hands the agent to the next vertex. The handler never pipes streams
+// itself; the graph owns topology.
+enum VertexDisposition {
+  VERTEX_DISPOSITION_UNSPECIFIED = 0;
+  VERTEX_DISPOSITION_FORWARD = 1;
+  VERTEX_DISPOSITION_SKIP = 2;
+  VERTEX_DISPOSITION_ERROR = 3;
+  VERTEX_DISPOSITION_TERMINATE = 4;
+}
+
+message VertexOutcome {
+  VertexDisposition disposition = 1;
+  bytes payload = 2;
+  string error_message = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Live stats / layout frames (dashboard wire format)
+// ---------------------------------------------------------------------------
+
+message NodeStats {
+  string id = 1;
+  uint64 object_count = 2;
+  uint64 error_count = 3;
+  uint64 ignore_count = 4;
+  uint32 source_count = 5;
+  uint32 sink_count = 6;
+  bool publish = 7;
+  bool external = 8;
+  double highwater_mark = 9;
+  string timestamp = 10;
+  uint64 in_flight = 11;
+  uint64 accepted = 12;
+  double last_handler_ms = 13;
+  double total_handler_ms = 14;
+  uint64 timed_out = 15;
+}
+
+message LinkStats {
+  string id = 1;
+  string source = 2;
+  string target = 3;
+  double value = 4;
+  uint64 object_count = 5;
+  uint64 error_count = 6;
+  double highwater_mark = 7;
+  string timestamp = 8;
+  uint64 drop_count = 9;
+  uint64 filter_count = 10;
+  uint32 capacity = 11;
+  uint64 depth = 12;
+  double blocked_ms = 13;
+  string last_drop_reason = 14;
+  double item_wait_ms = 15;
+}
+
+message LayoutFrame {
+  uint64 sequence = 1;
+  string timestamp = 2;
+  repeated NodeStats nodes = 3;
+  repeated LinkStats links = 4;
+  map<string, string> extra = 5;
+}
+
+// ---------------------------------------------------------------------------
+// Message bus (injected; core never owns a broker)
+// ---------------------------------------------------------------------------
+
+message BusTopics {
+  string layout = 1;  // graph/layout
+  string log = 2;     // from context.logTopic, default graph/log
+  string error = 3;   // from context.errorTopic, default graph/error
+}
+
+message BusMessage {
+  string topic = 1;
+  bytes payload = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Subscriber session (no persistence in core)
+// ---------------------------------------------------------------------------
+
+message Subscriber {
+  string id = 1;
+  bytes auth = 2;
+}
+
+message SessionContext {
+  string log_topic = 1;
+  string error_topic = 2;
+  map<string, string> extras = 3;
+}
+
+message ValidationIssue {
+  string code = 1;
+  string message = 2;
+  string vertex_id = 3;
+  string edge_id = 4;
+}
+
+message GraphValidation {
+  bool ok = 1;
+  repeated ValidationIssue issues = 2;
+}
