@@ -1,6 +1,24 @@
+import { timingSafeEqual } from "node:crypto";
 import { GraphAgent, type MonitorHooks } from "./GraphAgent.js";
 import type { ConveyorGraph } from "./ConveyorGraph.js";
 import type { SessionContext, SubscriberRecord } from "./model.js";
+
+function sameAuth(stored: unknown, presented: unknown): boolean {
+  if (stored == null || presented == null) return false;
+  if (typeof stored === "string" && typeof presented === "string") {
+    const a = Buffer.from(stored);
+    const b = Buffer.from(presented);
+    return a.length === b.length && timingSafeEqual(a, b);
+  }
+  if (typeof stored !== "object" || typeof presented !== "object") {
+    return Object.is(stored, presented);
+  }
+  try {
+    return JSON.stringify(stored) === JSON.stringify(presented);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * In-memory subscriber session. Persistence is the application's job;
@@ -41,8 +59,9 @@ export class Subscriber implements SubscriberRecord {
     return new GraphAgent(this.id, this.auth, this.context, this.streamGraph, this.hooks);
   }
 
-  verifyCredentials(_testAuth: unknown): boolean {
-    return this.auth != null;
+  /** Equality check against the stored session secret. Not a password hash. */
+  verifyCredentials(testAuth: unknown): boolean {
+    return sameAuth(this.auth, testAuth);
   }
 
   reset(): void {
