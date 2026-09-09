@@ -1,6 +1,6 @@
 {
   "name": "conveyor-graph",
-  "version": "0.1.2",
+  "version": "0.1.0",
   "description": "Typed in-process conveyor graph for Node.js",
   "type": "module",
   "main": "./dist/cjs/index.js",
@@ -41,13 +41,8 @@
     "example:wp-posts": "npx tsx examples/wp-posts-csv.ts"
   },
   "license": "ISC",
-  "dependencies": {
-    "parallel-transform": "^1.2.0",
-    "through2": "^4.0.2"
-  },
   "devDependencies": {
     "@types/node": "^22.10.0",
-    "@types/through2": "^2.0.41",
     "mysql2": "^3.14.0",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2",

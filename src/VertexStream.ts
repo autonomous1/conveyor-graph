@@ -1,6 +1,4 @@
-import through2 from "through2";
-import parallelTransform from "parallel-transform";
-import type { Transform } from "node:stream";
+import { Transform } from "node:stream";
 import type { NodeStats, VertexOptions } from "./model.js";
 import type { StreamAgent, TransformCallback } from "./StreamAgent.js";
 import { normalizeOutcome } from "./outcome.js";
@@ -46,14 +44,42 @@ export class VertexStream {
   }
 
   private initStream(opts: VertexOptions): Transform {
-    const transform = this.dispatch.bind(this);
-    let stream: Transform;
-    if (opts.parallel && opts.parallel > 0) {
-      stream = parallelTransform(opts.parallel, transform);
-    } else {
-      stream = through2.obj(transform);
-    }
-    return stream;
+    const parallel = opts.parallel && opts.parallel > 0 ? opts.parallel : 1;
+    let active = 0;
+    const queued: Array<() => void> = [];
+    return new Transform({
+      objectMode: true,
+      highWaterMark: Math.max(1, parallel),
+      transform: (chunk, enc, done) => {
+        const agent = chunk as StreamAgent;
+        const run = (release: () => void): void => {
+          active++;
+          this.dispatch(agent, enc, (err, out) => {
+            active--;
+            if (err) this._stream.destroy(err);
+            else if (out != null) this._stream.push(out);
+            release();
+            queued.shift()?.();
+          });
+        };
+        if (parallel <= 1) {
+          this.dispatch(agent, enc, (err, out) => {
+            if (err) done(err);
+            else done(null, out ?? null);
+          });
+          return;
+        }
+        if (active < parallel) {
+          run(() => undefined);
+          done();
+          return;
+        }
+        queued.push(() => {
+          run(() => undefined);
+          done();
+        });
+      },
+    });
   }
 
   private dispatch(
@@ -147,7 +173,7 @@ export class VertexStream {
     this._stream = stream;
   }
 
-  /** Classic through2-style transform (used by existing graphs). */
+  /** Classic (agent, enc, cb) transform. */
   set Transform(transform: ClassicTransform) {
     this._transform = transform;
     this._handler = null;

@@ -16,7 +16,7 @@ message VertexOptions {
   // When true, the vertex is a graph endpoint that publishes off-process
   // (MQTT / multiplex) instead of piping to another local stream.
   bool external = 2;
-  // Parallel transform concurrency. 0 / unset = serial through2.
+  // Parallel handler concurrency. 0 / unset = serial.
   uint32 parallel = 3;
   map<string, string> labels = 4;
   // "all" (default) or "first". First-match routing is Wave B.
