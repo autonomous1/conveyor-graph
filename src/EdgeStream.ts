@@ -7,6 +7,8 @@ export type EdgeWhen = (agent: StreamAgent) => boolean;
 export type OverflowHook = (info: { edgeId: string; reason: string; agent: StreamAgent }) => void;
 export type AdmitResult = "ok" | "full" | "dropped" | "errored";
 
+const inflightEdges = new WeakMap<StreamAgent, EdgeStream[]>();
+
 export interface EdgeConfig extends EdgeOptions {
   when?: EdgeWhen;
   onOverflow?: OverflowHook;
@@ -31,6 +33,8 @@ export class EdgeStream {
   queued = 0;
   peakQueued = 0;
   lastDropReason: string | null = null;
+  lastError: string | null = null;
+  private dest: Transform | null = null;
   private pressureStarted: number | null = null;
   private readonly spaceWaiters: Array<() => void> = [];
   spec: LinkStats;
@@ -46,14 +50,31 @@ export class EdgeStream {
     this.onOverflow = config.onOverflow;
     this.stream = new Transform({
       objectMode: true,
-      highWaterMark: 1,
+      highWaterMark: Math.max(1, this.capacity),
       transform: (chunk, _enc, cb) => {
         this.queued = Math.max(0, this.queued - 1);
         this.refreshSpec();
         this.emitSpace();
-        cb(null, chunk);
+        const dest = this.dest;
+        if (!dest || dest.destroyed || dest.writableEnded) {
+          this.noteError(
+            "handoff",
+            new Error(
+              `edge ${this.id} dest ${!dest ? "missing" : dest.destroyed ? "destroyed" : "ended"} queued=${this.queued}`,
+            ),
+          );
+          cb();
+          return;
+        }
+        try {
+          dest.write(chunk);
+        } catch (err) {
+          this.noteError("write", err);
+        }
+        cb();
       },
     });
+    this.stream.on("error", (err) => this.noteError("edge", err));
     this.spec = this.snapshot();
   }
 
@@ -96,7 +117,18 @@ export class EdgeStream {
   }
 
   attach(sink: VertexStream): void {
-    this.stream.pipe(sink.stream);
+    this.dest = sink.stream;
+    this.dest.on("error", (err) => this.noteError("dest", err));
+    if (this.stream.isPaused()) this.stream.resume();
+  }
+
+  private noteError(where: string, err: unknown): void {
+    const message = err instanceof Error ? err.message : String(err);
+    this.errorCount++;
+    this.lastError = `${where}: ${message}`;
+    this.lastDropReason = this.lastError;
+    this.refreshSpec();
+    console.error(`[conveyor-graph edge ${this.id}] ${this.lastError}`);
   }
 
   admit(agent: StreamAgent): AdmitResult {
@@ -119,13 +151,55 @@ export class EdgeStream {
       agent.error(this.sourceId, new Error(`edge ${this.id} overflow`));
       return "errored";
     }
-    this.stream.write(agent);
+    if (!this.dest || this.dest.destroyed || this.dest.writableEnded) {
+      this.noteError(
+        "admit",
+        new Error(
+          `edge ${this.id} dest ${!this.dest ? "missing" : this.dest.destroyed ? "destroyed" : "ended"}`,
+        ),
+      );
+      return "errored";
+    }
     this.queued++;
     this.peakQueued = Math.max(this.peakQueued, this.queued);
     this.objectCount++;
+    const held = inflightEdges.get(agent) ?? [];
+    held.push(this);
+    inflightEdges.set(agent, held);
+    try {
+      this.dest.write(agent);
+    } catch (err) {
+      this.noteError("admit", err);
+      this.release();
+      const held = inflightEdges.get(agent);
+      if (held) {
+        const i = held.lastIndexOf(this);
+        if (i >= 0) held.splice(i, 1);
+        if (held.length === 0) inflightEdges.delete(agent);
+      }
+      return "errored";
+    }
     if (this.queued >= this.capacity) this.markPressure();
     this.refreshSpec();
     return "ok";
+  }
+
+  release(): void {
+    this.queued = Math.max(0, this.queued - 1);
+    this.emitSpace();
+    this.refreshSpec();
+  }
+
+  static releaseAgent(agent: StreamAgent, vertexId?: string): void {
+    const held = inflightEdges.get(agent);
+    if (!held || held.length === 0) return;
+    const i = vertexId
+      ? held.findIndex((edge) => edge.targetId === vertexId)
+      : held.length - 1;
+    if (i < 0) return;
+    const [edge] = held.splice(i, 1);
+    edge?.release();
+    if (held.length === 0) inflightEdges.delete(agent);
   }
 
   waitForSpace(signal?: AbortSignal): Promise<void> {

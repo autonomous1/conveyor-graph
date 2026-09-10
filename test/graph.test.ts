@@ -54,6 +54,48 @@ describe("ConveyorGraph", () => {
     expect(agent.node.src!.objectCount).toBeGreaterThanOrEqual(1);
   });
 
+  it("fans in from three sources without closing the join vertex", async () => {
+    const g = new ConveyorGraph().initGraph();
+    const seen: string[] = [];
+    g.define("a", (agent: StreamAgent) => agent.payload);
+    g.define("b", (agent: StreamAgent) => agent.payload);
+    g.define("c", (agent: StreamAgent) => agent.payload);
+    g.define("join", (agent: StreamAgent) => {
+      seen.push(String(agent.payload));
+      return agent.payload;
+    });
+    g.connect("a", "join");
+    g.connect("b", "join");
+    g.connect("c", "join");
+    g.seal();
+    const ga = new GraphAgent("t", {}, {}, g);
+    for (let i = 0; i < 4; i++) {
+      ga.write("a", `a-${i}`, `a${i}`);
+      ga.write("b", `b-${i}`, `b${i}`);
+      ga.write("c", `c-${i}`, `c${i}`);
+    }
+    await g.drain(2_000);
+    expect(seen).toHaveLength(12);
+  });
+
+  it("keeps a serial vertex open across many items", async () => {
+    const g = new ConveyorGraph().initGraph();
+    const seen: number[] = [];
+    g.define("src", (agent: StreamAgent) => Number(agent.payload));
+    g.define("dst", (agent: StreamAgent) => {
+      seen.push(Number(agent.payload));
+      return agent.payload;
+    });
+    g.link("src", "dst");
+    g.seal();
+    const ga = new GraphAgent("t", {}, {}, g);
+    for (let i = 0; i < 20; i++) ga.write("src", `i-${i}`, i);
+    await g.drain(2_000);
+    expect(seen).toHaveLength(20);
+    expect(seen[0]).toBe(0);
+    expect(seen[19]).toBe(19);
+  });
+
   it("runs an async handler before hand-off", async () => {
     const g = new ConveyorGraph().initGraph();
     const seen: unknown[] = [];
@@ -247,6 +289,8 @@ describe("Subscriber", () => {
     expect(ga.id).toBe("u1");
     expect(ga.streamGraph).toBe(g);
     expect(sub.verifyCredentials({ token: "x" })).toBe(true);
+    expect(sub.verifyCredentials({ token: "y" })).toBe(false);
+    expect(sub.verifyCredentials(null)).toBe(false);
   });
 });
 

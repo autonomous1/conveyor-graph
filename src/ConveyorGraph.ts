@@ -256,7 +256,6 @@ export class ConveyorGraph {
 
   occupancy(): number {
     let n = this.totalInFlight() + this.admissionWaiters.size + this.pendingEdgeWaits;
-    for (const vertex of Object.values(this.vertex)) n += vertex.bufferDepth();
     for (const edge of Object.values(this.edge)) n += edge.queued;
     return n;
   }

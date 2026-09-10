@@ -3,6 +3,7 @@ import type { NodeStats, VertexOptions } from "./model.js";
 import type { StreamAgent, TransformCallback } from "./StreamAgent.js";
 import { normalizeOutcome } from "./outcome.js";
 import { composeSignals } from "./abort.js";
+import { EdgeStream } from "./EdgeStream.js";
 
 export type ClassicTransform = (
   agent: StreamAgent,
@@ -49,23 +50,22 @@ export class VertexStream {
     const queued: Array<() => void> = [];
     return new Transform({
       objectMode: true,
-      highWaterMark: Math.max(1, parallel),
+      highWaterMark: Math.max(8, parallel * 2),
       transform: (chunk, enc, done) => {
         const agent = chunk as StreamAgent;
         const run = (release: () => void): void => {
           active++;
           this.dispatch(agent, enc, (err, out) => {
             active--;
-            if (err) this._stream.destroy(err);
-            else if (out != null) this._stream.push(out);
+            if (!err && out != null) this._stream.push(out);
             release();
             queued.shift()?.();
           });
         };
         if (parallel <= 1) {
           this.dispatch(agent, enc, (err, out) => {
-            if (err) done(err);
-            else done(null, out ?? null);
+            if (!err && out != null) done(null, out);
+            else done();
           });
           return;
         }
@@ -93,6 +93,7 @@ export class VertexStream {
     this.inFlight++;
     const done: TransformCallback = (err, next) => {
       this.inFlight = Math.max(0, this.inFlight - 1);
+      EdgeStream.releaseAgent(agent, this.id);
       cb(err, next);
       agent.graphAgent.streamGraph.notifyIdle();
     };
@@ -226,8 +227,10 @@ export class VertexStream {
   }
 
   bufferDepth(): number {
-    const s = this._stream as Transform & { writableLength?: number; readableLength?: number };
-    const depth = s.writableLength ?? s.readableLength ?? 0;
+    const s = this._stream as Transform & { writableLength?: number };
+    // Occupancy is admitted-but-unconsumed input, not the readable side.
+    // Counting readableLength left drain() stuck after the last item.
+    const depth = s.writableLength ?? 0;
     this.peakDepth = Math.max(this.peakDepth, depth, this.inFlight);
     return depth;
   }

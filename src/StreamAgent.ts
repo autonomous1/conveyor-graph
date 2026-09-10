@@ -48,23 +48,25 @@ export class StreamAgent {
    */
   forwardFrom(nodeId: string, payload: unknown, cb: TransformCallback = () => undefined): void {
     this.settled = true;
+    const live = this.graphAgent.streamGraph.vertex[nodeId];
     const node = this.graphAgent.node[nodeId];
-    if (!node) {
+    if (!live && !node) {
       this.graphAgent.streamGraph.deliver(nodeId, this, payload, cb);
       return;
     }
 
-    if (node.external) {
+    if (live?.external || node?.external) {
       this.graphAgent.publish(nodeId, payload);
-      this.recordStats(node, payload);
+      if (node) this.recordStats(node, payload);
       cb(null, null);
       return;
     }
 
-    if (node.publish) this.graphAgent.publish(nodeId, payload);
-    this.recordStats(node, payload);
+    if ((live?.publish ?? node?.publish) && node) this.graphAgent.publish(nodeId, payload);
+    if (node) this.recordStats(node, payload);
 
-    if (node.sourceCount === 0) {
+    const outgoing = live?.sourceCount ?? node?.sourceCount ?? 0;
+    if (outgoing === 0) {
       cb(null, null);
       return;
     }
