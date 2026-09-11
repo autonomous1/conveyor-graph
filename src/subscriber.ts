@@ -30,6 +30,7 @@ export class Subscriber implements SubscriberRecord {
   context: SessionContext;
   private readonly streamGraph: ConveyorGraph;
   private readonly hooks: MonitorHooks;
+  private _graphAgent?: GraphAgent;
 
   constructor(
     id: string,
@@ -56,7 +57,7 @@ export class Subscriber implements SubscriberRecord {
   }
 
   get graphAgent(): GraphAgent {
-    return new GraphAgent(this.id, this.auth, this.context, this.streamGraph, this.hooks);
+    return (this._graphAgent ??= new GraphAgent(this.id, this.auth, this.context, this.streamGraph, this.hooks));
   }
 
   /** Equality check against the stored session secret. Not a password hash. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ConveyorGraph, type StreamAgent } from "../src/index.js";
+import { ConveyorGraph, GraphAgent, type LayoutFrame, type StreamAgent } from "../src/index.js";
 import { agent, wait } from "./helpers.js";
 
 describe("contract: telemetry", () => {
@@ -62,5 +62,33 @@ describe("contract: telemetry", () => {
     await wait(20);
     ga.clearStats();
     expect(ga.node.job!.objectCount).toBe(0);
+  });
+
+  it("emits idle frames on onFrame with graphId and phase", () => {
+    const graph = new ConveyorGraph("viz");
+    graph.define("only", (a: StreamAgent) => a.payload);
+    const frames: LayoutFrame[] = [];
+    const ga = new GraphAgent("s", {}, {}, graph, {
+      onFrame: (frame) => frames.push(frame),
+    });
+    ga.monitorFrame();
+    expect(frames).toHaveLength(1);
+    expect(frames[0]!.graphId).toBe("viz");
+    expect(frames[0]!.phase).toBe("building");
+    expect(typeof frames[0]!.aborted).toBe("boolean");
+    expect(frames[0]!.sequence).toBe(1);
+  });
+
+  it("publishes a terminal frame from stopStreamMonitor", () => {
+    const graph = new ConveyorGraph("viz");
+    const frames: LayoutFrame[] = [];
+    const ga = new GraphAgent("s", {}, {}, graph, {
+      onFrame: (frame) => frames.push(frame),
+      intervalMs: 10_000,
+    });
+    ga.startStreamMonitor();
+    ga.stopStreamMonitor();
+    expect(frames.length).toBeGreaterThanOrEqual(1);
+    expect(frames.at(-1)!.graphId).toBe("viz");
   });
 });

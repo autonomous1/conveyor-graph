@@ -7,6 +7,7 @@ import { toPayloadString } from "./utils.js";
 import { composeSignals } from "./abort.js";
 
 export interface MonitorHooks {
+  onFrame?: (frame: LayoutFrame) => void;
   extraFrameFields?: (nodes: Record<string, NodeStats>) => Record<string, unknown>;
   layoutTopic?: string;
   intervalMs?: number;
@@ -159,7 +160,7 @@ export class GraphAgent {
     this._frameId = 0;
     for (const key of Object.keys(this.node)) {
       const live = this.streamGraph.vertex[key];
-      if (live) this.node[key] = live.spec;
+      if (live) this.node[key] = live.resetStats();
     }
   }
 
@@ -167,6 +168,7 @@ export class GraphAgent {
     this.clearStats();
     const ms = this.hooks.intervalMs ?? 500;
     this._interval = setInterval(() => this.monitorFrame(), ms);
+    this._interval.unref?.();
   }
 
   stopStreamMonitor(): void {
@@ -174,6 +176,7 @@ export class GraphAgent {
       clearInterval(this._interval);
       this._interval = undefined;
     }
+    this.monitorFrame();
   }
 
   publishStats(statsId: string, logTopic: string): void {
@@ -183,11 +186,8 @@ export class GraphAgent {
     this.write(BUILTIN.log, statsId, node);
   }
 
-  waitUntilProcessed(total: number): Promise<void> {
-    this._totalPacketsExpected = total;
-    return new Promise((resolve) => {
-      this._resolveCB = resolve;
-    });
+  waitUntilProcessed(_total?: number): Promise<void> {
+    return this.streamGraph.whenIdle();
   }
 
   private processNodeStats(
@@ -206,22 +206,16 @@ export class GraphAgent {
   }
 
   monitorFrame(): void {
-    if (this._totalPacketsExpected && this._resolveCB) {
-      const log = this.node[BUILTIN.log]?.objectCount ?? 0;
-      const skip = this.node[BUILTIN.skip]?.objectCount ?? 0;
-      const err = this.node[BUILTIN.error]?.objectCount ?? 0;
-      if (log + skip + err >= this._totalPacketsExpected) {
-        this._resolveCB();
-        this._resolveCB = null;
-      }
-    }
+    if (!this._mqClient && !this.hooks.onFrame) return;
 
-    if (!this._mqClient) return;
-
+    const ts = new Date().toISOString();
     const extra = this.hooks.extraFrameFields?.(this.node) ?? {};
     const frame: LayoutFrame = {
+      graphId: this.streamGraph.id,
+      phase: this.streamGraph.status,
+      aborted: this.streamGraph.abortSignal.aborted,
       sequence: ++this._frameId,
-      timestamp: new Date().toISOString(),
+      timestamp: ts,
       nodes: [],
       links: [],
       extra,
@@ -246,14 +240,15 @@ export class GraphAgent {
 
     for (const linkKey of Object.keys(this.streamGraph.edge)) {
       const live = this.streamGraph.edge[linkKey]!;
-      live.refreshSpec();
+      live.refreshSpec(ts);
       this.link[linkKey] = live.spec;
       if (active[live.sourceId] && active[live.targetId]) {
         frame.links.push(live.spec);
       }
     }
 
-    if (frame.nodes.length > 1 && frame.links.length) {
+    this.hooks.onFrame?.(frame);
+    if (this._mqClient) {
       const topic = this.hooks.layoutTopic ?? DEFAULT_TOPICS.layout;
       this._mqClient.publish(topic, JSON.stringify(frame));
     }

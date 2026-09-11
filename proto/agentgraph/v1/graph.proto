@@ -125,6 +125,9 @@ message LayoutFrame {
   repeated NodeStats nodes = 3;
   repeated LinkStats links = 4;
   map<string, string> extra = 5;
+  string graph_id = 6;
+  string phase = 7;
+  bool aborted = 8;
 }
 
 // ---------------------------------------------------------------------------

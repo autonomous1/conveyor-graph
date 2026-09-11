@@ -114,6 +114,9 @@ export interface LinkStats {
 }
 
 export interface LayoutFrame {
+  graphId: string;
+  phase: GraphPhase;
+  aborted: boolean;
   sequence: number;
   timestamp: string;
   nodes: NodeStats[];

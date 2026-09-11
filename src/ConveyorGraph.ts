@@ -13,6 +13,7 @@ export class ConveyorGraph {
   private phase: GraphPhase = "building";
   private signal?: AbortSignal;
   private readonly cancel = new AbortController();
+  private _abortSignal?: AbortSignal;
   readonly admissionWaiters = new Set<() => void>();
   pendingEdgeWaits = 0;
   private readonly idleWaiters = new Set<() => void>();
@@ -20,6 +21,7 @@ export class ConveyorGraph {
 
   constructor(id = "default") {
     this.id = id;
+    this.initGraph();
   }
 
   get node(): Record<string, VertexStream> {
@@ -35,7 +37,7 @@ export class ConveyorGraph {
     return this.phase;
   }
   get abortSignal(): AbortSignal {
-    return composeSignals(this.signal, this.cancel.signal);
+    return (this._abortSignal ??= composeSignals(this.signal, this.cancel.signal));
   }
 
   get GRAPH_LOG(): string {
@@ -237,6 +239,7 @@ export class ConveyorGraph {
     }
     this.phase = "sealed";
     this.signal = options.signal;
+    this._abortSignal = undefined;
     if (this.signal?.aborted) this.phase = "stopped";
     this.signal?.addEventListener("abort", () => {
       void this.stop({ force: true });
@@ -255,7 +258,10 @@ export class ConveyorGraph {
   }
 
   occupancy(): number {
-    let n = this.totalInFlight() + this.admissionWaiters.size + this.pendingEdgeWaits;
+    let n = this.admissionWaiters.size + this.pendingEdgeWaits;
+    for (const vertex of Object.values(this.vertex)) {
+      n += vertex.inFlight + vertex.bufferDepth();
+    }
     for (const edge of Object.values(this.edge)) n += edge.queued;
     return n;
   }
@@ -266,10 +272,12 @@ export class ConveyorGraph {
   }
 
   notifyIdle(): void {
-    if (this.occupancy() > 0) return;
-    const waiters = [...this.idleWaiters];
-    this.idleWaiters.clear();
-    for (const w of waiters) w();
+    queueMicrotask(() => {
+      if (this.occupancy() > 0) return;
+      const waiters = [...this.idleWaiters];
+      this.idleWaiters.clear();
+      for (const w of waiters) w();
+    });
   }
 
   whenIdle(): Promise<void> {
@@ -292,6 +300,7 @@ export class ConveyorGraph {
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.idleWaiters.delete(onIdle);
+        this.cancel.signal.removeEventListener("abort", onAbort);
         reject(new Error(`ConveyorGraph.drain timed out after ${timeoutMs}ms`));
       }, timeoutMs);
       const onAbort = () => {
@@ -325,9 +334,6 @@ export class ConveyorGraph {
     this.phase = "stopped";
     for (const vertex of Object.values(this.vertex)) {
       vertex.stream.destroy();
-    }
-    for (const edge of Object.values(this.edge)) {
-      edge.stream.destroy();
     }
   }
 

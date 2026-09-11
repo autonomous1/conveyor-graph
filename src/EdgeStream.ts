@@ -23,7 +23,6 @@ export class EdgeStream {
   readonly overflow: Overflow;
   readonly when: EdgeWhen;
   readonly onOverflow?: OverflowHook;
-  readonly stream: Transform;
   objectCount = 0;
   dropCount = 0;
   filterCount = 0;
@@ -48,37 +47,18 @@ export class EdgeStream {
     this.overflow = config.overflow ?? (this.delivery === "bestEffort" ? "drop" : "block");
     this.when = config.when ?? (() => true);
     this.onOverflow = config.onOverflow;
-    this.stream = new Transform({
-      objectMode: true,
-      highWaterMark: Math.max(1, this.capacity),
-      transform: (chunk, _enc, cb) => {
-        this.queued = Math.max(0, this.queued - 1);
-        this.refreshSpec();
-        this.emitSpace();
-        const dest = this.dest;
-        if (!dest || dest.destroyed || dest.writableEnded) {
-          this.noteError(
-            "handoff",
-            new Error(
-              `edge ${this.id} dest ${!dest ? "missing" : dest.destroyed ? "destroyed" : "ended"} queued=${this.queued}`,
-            ),
-          );
-          cb();
-          return;
-        }
-        try {
-          dest.write(chunk);
-        } catch (err) {
-          this.noteError("write", err);
-        }
-        cb();
-      },
-    });
-    this.stream.on("error", (err) => this.noteError("edge", err));
     this.spec = this.snapshot();
   }
 
+  /**
+   * Edge map key. Hyphen-free vertex ids keep the historical `source-sink` form
+   * so existing lookups continue to work. If either id contains `-`, the pair is
+   * JSON-encoded so `"a-b"→"c"` cannot collide with `"a"→"b-c"`.
+   */
   static id(sourceId: string, sinkId: string): string {
+    if (sourceId.includes("-") || sinkId.includes("-")) {
+      return JSON.stringify([sourceId, sinkId]);
+    }
     return `${sourceId}-${sinkId}`;
   }
 
@@ -119,7 +99,6 @@ export class EdgeStream {
   attach(sink: VertexStream): void {
     this.dest = sink.stream;
     this.dest.on("error", (err) => this.noteError("dest", err));
-    if (this.stream.isPaused()) this.stream.resume();
   }
 
   private noteError(where: string, err: unknown): void {
@@ -242,7 +221,7 @@ export class EdgeStream {
     this.refreshSpec();
   }
 
-  snapshot(): LinkStats {
+  snapshot(ts?: string): LinkStats {
     return {
       id: this.id,
       source: this.sourceId,
@@ -251,7 +230,7 @@ export class EdgeStream {
       objectCount: this.objectCount,
       errorCount: this.errorCount,
       highwaterMark: this.peakQueued,
-      timestamp: new Date().toISOString(),
+      timestamp: ts ?? new Date().toISOString(),
       dropCount: this.dropCount,
       filterCount: this.filterCount,
       capacity: this.capacity,
@@ -262,8 +241,8 @@ export class EdgeStream {
     };
   }
 
-  refreshSpec(): void {
-    this.spec = this.snapshot();
+  refreshSpec(ts?: string): void {
+    this.spec = this.snapshot(ts);
   }
 
   resetPeaks(): void {

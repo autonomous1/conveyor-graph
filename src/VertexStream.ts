@@ -25,6 +25,7 @@ export class VertexStream {
   private _handler: VertexHandler | null = null;
   private _updateDataStats?: (payload: unknown, data: Record<string, unknown>) => void;
   private _resetDataStats?: () => Record<string, unknown>;
+  private _data?: Record<string, unknown>;
   sourceCount = 0;
   sinkCount = 0;
   publish: boolean;
@@ -65,18 +66,18 @@ export class VertexStream {
         if (parallel <= 1) {
           this.dispatch(agent, enc, (err, out) => {
             if (!err && out != null) done(null, out);
-            else done();
+            else done(null);
           });
           return;
         }
         if (active < parallel) {
           run(() => undefined);
-          done();
+          done(null);
           return;
         }
         queued.push(() => {
           run(() => undefined);
-          done();
+          done(null);
         });
       },
     });
@@ -126,7 +127,10 @@ export class VertexStream {
           if (timer) clearTimeout(timer);
           this.lastHandlerMs = Date.now() - started;
           this.totalHandlerMs += this.lastHandlerMs;
-          if (agent.settled) return;
+          if (agent.settled) {
+            done(null);
+            return;
+          }
           this.applyOutcome(agent, normalizeOutcome(result, agent.payload), done);
         })
         .catch((err: Error) => {
@@ -195,16 +199,10 @@ export class VertexStream {
   }
 
   get spec(): NodeStats {
-    const stats = this.resetStats();
-    stats.sourceCount = this.sourceCount;
-    stats.sinkCount = this.sinkCount;
-    stats.publish = this.publish;
-    stats.external = this.external;
-    stats.updateDataStats = this._updateDataStats;
-    return stats;
+    return this.snapshot();
   }
 
-  resetStats(): NodeStats {
+  snapshot(): NodeStats {
     return {
       id: this.id,
       objectCount: 0,
@@ -221,9 +219,18 @@ export class VertexStream {
       lastHandlerMs: this.lastHandlerMs,
       totalHandlerMs: this.totalHandlerMs,
       timedOut: this.timedOut,
-      data: this._resetDataStats ? this._resetDataStats() : {},
+      data: this.currentData(),
       updateDataStats: this._updateDataStats,
     };
+  }
+
+  resetStats(): NodeStats {
+    this._data = this._resetDataStats ? this._resetDataStats() : {};
+    return this.snapshot();
+  }
+
+  private currentData(): Record<string, unknown> {
+    return (this._data ??= {});
   }
 
   bufferDepth(): number {
@@ -256,8 +263,26 @@ export class VertexStream {
   }
 
   onceDrain(): Promise<void> {
-    return new Promise((resolve) => {
-      this._stream.once("drain", resolve);
+    const stream = this._stream;
+    if (stream.destroyed || stream.writableEnded) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve, reject) => {
+      const finish = (err?: Error) => {
+        stream.off("drain", onDrain);
+        stream.off("close", onClose);
+        stream.off("finish", onClose);
+        stream.off("error", onError);
+        if (err) reject(err);
+        else resolve();
+      };
+      const onDrain = () => finish();
+      const onClose = () => finish();
+      const onError = (err: Error) => finish(err);
+      stream.once("drain", onDrain);
+      stream.once("close", onClose);
+      stream.once("finish", onClose);
+      stream.once("error", onError);
     });
   }
 }

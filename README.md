@@ -1,10 +1,23 @@
 # conveyor-graph
 
-`conveyor-graph` is a lightweight, typed, in-process conveyor for Node.js. It moves individual items through named processing stations using bounded edges, backpressure, per-item routing, controlled fan-out, and observable runtime state.
+`conveyor-graph` subsumes the common object-mode use cases of `through2` and `parallel-transform`, with **zero runtime dependencies**, while adding graph topology, schema-validated construction, routing, bounded per-edge queues, explicit overload policy, fan-in/fan-out, lifecycle controls, and real-time observability.
+
+It moves individual items through named vertices over bounded edges. Backpressure, overflow (`block` / `error` / `drop`), per-item `when` routing, controlled fan-out, and live occupancy counters are part of the graph, not wrappers around Node streams.
 
 It is not `stream.pipeline()`: use that for a simple linear stream. It is not Temporal: this package does not persist workflows, recover after process failure, or coordinate work across hosts. Use it when you need an inspectable routing graph inside one Node process.
 
-This is the TypeScript port of the `net-stream` / `net-stream-utils` / `net-stream-subscriber` packages. The original `src/` application is left as a usage example.
+## Related packages
+
+This runtime has **no runtime dependencies**. Construction, demos, and network fixtures live in siblings so those heavier deps stay off the published graph.
+
+| Package | Role |
+|---|---|
+| `conveyor-graph` | In-process runtime: vertices, bounded edges, seal / drain / stop, live counters. |
+| `conveyor-graph-model` | JSON Schema, `VertexRegistry`, `loadGraph`, builtins (`identity`, `log.print`, `sql.query`, `chunk.frame` / `order` / `collect`). |
+| `conveyor-graph-simulator` | Virtual-time harness and S-series scenarios (backpressure, overflow, routing, chunking). |
+| `conveyor-graph-ssh-simulator` | T-series on real loopback SSH via `ssh_tunnel_proxy` (optional; skip when SSH deps are absent). |
+
+Declarative documents and typed vertices: `loadGraph` in `conveyor-graph-model`. Proof-by-experiment: the two simulator packages.
 
 ## Model
 
