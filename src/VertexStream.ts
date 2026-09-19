@@ -101,7 +101,7 @@ export class VertexStream {
 
     if (this._handler) {
       const started = Date.now();
-      const timeoutMs = agent.timeoutMs ?? this.options.timeoutMs;
+      const timeoutMs = agent.timeoutMs ?? this.options.timeoutMs ?? 0;
       const tickAbort = new AbortController();
       agent.signal = composeSignals(tickAbort.signal, agent.signal, agent.graphAgent.streamGraph.abortSignal);
       const run = Promise.resolve().then(() => {

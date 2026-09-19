@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { GraphAgent, ConveyorGraph, Subscriber, type StreamAgent } from "../src/index.js";
+import { GraphAgent, ConveyorGraph, Subscriber, EdgeStream, type StreamAgent } from "../src/index.js";
+
+function eid(source: string, sink: string): string {
+  return EdgeStream.id(source, sink);
+}
 
 function wait(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -33,8 +37,8 @@ describe("ConveyorGraph", () => {
     expect(g.vertex.mid!.sourceCount).toBe(1);
     expect(g.vertex.end!.sinkCount).toBe(1);
     expect(g.vertex.end!.sourceCount).toBe(0);
-    expect(g.edge["start-mid"]).toBeDefined();
-    expect(g.edge["mid-end"]).toBeDefined();
+    expect(g.edge[eid("start", "mid")]).toBeDefined();
+    expect(g.edge[eid("mid", "end")]).toBeDefined();
   });
 
   it("runs a sync handler and forwards payload", async () => {
@@ -277,7 +281,7 @@ describe("edges and fan-out", () => {
     await wait(40);
     expect(kept).toContain("yes");
     expect(dropped).toEqual([]);
-    expect(g.edge["src-drop"]!.filterCount).toBeGreaterThanOrEqual(1);
+    expect(g.edge[eid("src", "drop")]!.filterCount).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -314,6 +318,24 @@ describe("lifecycle", () => {
     await g.stop({ force: true });
     const ga = new GraphAgent("t", {}, {}, g);
     expect(() => ga.write("a", "1", {})).toThrow(/stopped/);
+  });
+
+  it("timeoutMs 0 does not arm a wall timer", async () => {
+    const g = new ConveyorGraph().initGraph();
+    let finished = false;
+    g.define("slow", { timeoutMs: 0 }, async (agent: StreamAgent) => {
+      await wait(40);
+      finished = true;
+      return agent.payload;
+    });
+    g.seal();
+    const ga = new GraphAgent("t", {}, {}, g);
+    ga.write("slow", "1", {});
+    expect(g.hasWork()).toBe(true);
+    await g.whenIdle();
+    expect(finished).toBe(true);
+    expect(g.vertex.slow!.timedOut).toBe(0);
+    expect(g.hasWork()).toBe(false);
   });
 
   it("drain waits until in-flight work finishes", async () => {

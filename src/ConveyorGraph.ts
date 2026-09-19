@@ -266,6 +266,11 @@ export class ConveyorGraph {
     return n;
   }
 
+  /** True while any in-flight handler, vertex buffer, edge queue, or admission waiter remains. */
+  hasWork(): boolean {
+    return this.occupancy() > 0;
+  }
+
   rejectAdmissionWaiters(): void {
     for (const reject of this.admissionWaiters) reject();
     this.admissionWaiters.clear();
@@ -281,7 +286,7 @@ export class ConveyorGraph {
   }
 
   whenIdle(): Promise<void> {
-    if (this.occupancy() === 0) return Promise.resolve();
+    if (!this.hasWork()) return Promise.resolve();
     return new Promise((resolve) => this.idleWaiters.add(resolve));
   }
 

@@ -29,6 +29,7 @@ export interface VertexOptions {
   labels?: Record<string, string>;
   /** Wave B honors "first"; Wave A pipes to every downstream edge. */
   fanout?: FanoutMode;
+  /** Wall-clock handler cap. `0` or omitted: no timer (required for deterministic simulation). */
   timeoutMs?: number;
 }
 
